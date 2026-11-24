@@ -122,7 +122,7 @@
 
 - `server.Server.AddReference(source, refType, target)`：在兩個已存在的節點之間加參照與反向參照；refType 必須是 ReferenceType 節點。MBController 用它保留舊的 `Objects/Data` 入口，以 Organizes 指向新結構裡的同一批點位節點。
 
-## 未發版
+## v0.2.1（2026-11-24）
 
 - `client.Dial`：開 session 時連「使用者指定的主機」＋「伺服器回報端點的埠與路徑」（OPC 10000-4 §5.4.4 允許用戶端以 discovery 時用的主機取代）。之前直接連伺服器回報的網址，伺服器回報用戶端查不到的主機名稱時（例如舊版 MBController 回報 `opc.tcp://<電腦名稱>:46010`）會卡在 DNS 查詢而連不上。
 - **32 位元修正**（`uasc`、`monitor`）：`channelInstance.bytesSent` 與 monitor 的 `delivered` / `dropped` 改用 `atomic.Uint64`。原本是 `uint64` 加 `atomic.AddUint64`，靠欄位順序對齊；P0 加固在 `channelInstance` 前面加了欄位後對齊跑掉，32 位元平台（armv7、386）收到第一個 MSG 就 panic，`receiveSafe` 把 panic 轉成錯誤、送 ERR BadTCPInternalError 並關閉通道。CI 新增 `GOARCH=386` 單元測試工作。
