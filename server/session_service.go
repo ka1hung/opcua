@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/binary"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -44,8 +46,11 @@ func (s *Server) getEndpoints(ctx context.Context, r *Request) (ua.Response, err
 
 // endpointsFor returns the endpoints whose URL matches u, ignoring case
 // and a trailing slash. When none match - a client reached the server by
-// an address that is not in its endpoint list, such as another IP - all
-// endpoints are returned, so that the client can still connect.
+// an address that is not in its endpoint list, such as an IP while the
+// server is configured with its host name - the endpoints are returned
+// with their host replaced by the one the client used (port and path
+// kept). A client that follows the returned URL then connects the same
+// way it reached the server, without needing a DNS name it cannot resolve.
 func (s *Server) endpointsFor(u string) []*ua.EndpointDescription {
 	all := s.Endpoints()
 	norm := func(x string) string { return strings.TrimSuffix(strings.ToLower(x), "/") }
@@ -55,8 +60,36 @@ func (s *Server) endpointsFor(u string) []*ua.EndpointDescription {
 			out = append(out, ep)
 		}
 	}
-	if len(out) == 0 {
+	if len(out) > 0 {
+		return out
+	}
+	req, err := url.Parse(u)
+	if err != nil || req.Hostname() == "" {
 		return all
+	}
+	seen := map[string]bool{}
+	for _, ep := range all {
+		a, err := url.Parse(ep.EndpointURL)
+		if err != nil {
+			out = append(out, ep)
+			continue
+		}
+		port := a.Port()
+		if port == "" {
+			port = req.Port()
+		}
+		a.Host = req.Hostname()
+		if port != "" {
+			a.Host = net.JoinHostPort(req.Hostname(), port)
+		}
+		k := a.String() + "|" + ep.SecurityPolicyURI + "|" + ep.SecurityMode.String()
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		c := *ep
+		c.EndpointURL = a.String()
+		out = append(out, &c)
 	}
 	return out
 }

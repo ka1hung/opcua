@@ -1284,7 +1284,7 @@ func (s *SecureChannel) sendAsyncWithTimeout(
 		}
 		s.c.SetWriteDeadline(time.Time{})
 
-		atomic.AddUint64(&instance.bytesSent, uint64(n))
+		instance.bytesSent.Add(uint64(n))
 		atomic.AddUint32(&instance.messagesSent, 1)
 
 		debug.Printf("uasc %d/%d: send %T with %d bytes", s.c.ID(), reqID, req, len(chunk))
@@ -1355,7 +1355,7 @@ func (s *SecureChannel) writeMessageChunks(ctx context.Context, instance *channe
 		}
 
 		bytesSent += n
-		atomic.AddUint64(&instance.bytesSent, uint64(n))
+		instance.bytesSent.Add(uint64(n))
 		atomic.AddUint32(&instance.messagesSent, 1)
 	}
 

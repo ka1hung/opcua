@@ -6,6 +6,8 @@ Every difference from the gopcua base is listed in [docs/CHANGES.md](docs/CHANGE
 
 ## Unreleased
 
+- **32-bit (armv7) fix**: 64-bit counters in the secure channel and monitor were not aligned on 32-bit platforms, so the first service request panicked and the connection was closed (clients saw BadTCPInternalError). CI now runs the tests as 32-bit too.
+- Server: when a client connects by an address that is not in the configured list (for example by IP while the server is configured with its host name), the returned endpoint URLs use the client's address, so networks without DNS work.
 - Client fix: when a server advertises an endpoint URL with a host name the client cannot resolve (common in the field), the client connects to the host it dialled, keeping the advertised port and path; it used to fail on the DNS lookup.
 
 ## v0.2.0 (2026-11-24)

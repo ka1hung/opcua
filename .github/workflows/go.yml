@@ -41,6 +41,21 @@ jobs:
       - name: Conformance tests (-race)
         run: go test -count=1 -race -tags=conformance ./tests/...
 
+  test-32bit:
+    # armv7 現場控制器是 32 位元：64 位元的 atomic 欄位沒對齊會直接 panic，
+    # 64 位元機器上看不出來，所以另外用 386 跑一次全部單元測試。
+    name: Test (linux, 386)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Unit tests (GOARCH=386)
+        env:
+          GOARCH: "386"
+        run: go test -count=1 ./...
+
   cross-build:
     name: Cross build (CGO_ENABLED=0)
     runs-on: ubuntu-latest

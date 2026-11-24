@@ -120,8 +120,8 @@ type Request struct {
 // Subscription is an instance of an active subscription.
 // Nodes can be added and removed concurrently.
 type Subscription struct {
-	delivered        uint64
-	dropped          uint64
+	delivered        atomic.Uint64
+	dropped          atomic.Uint64
 	monitor          *NodeMonitor
 	sub              *opcua.Subscription
 	internalNotifyCh chan *opcua.PublishNotificationData
@@ -232,7 +232,7 @@ func (s *Subscription) pump(ctx context.Context, notifyCh chan<- *DataChangeMess
 			if cb != nil && cap(s.internalNotifyCh) > 0 {
 				if len(s.internalNotifyCh) == cap(s.internalNotifyCh) {
 					s.sendError(ErrSlowConsumer)
-					atomic.AddUint64(&s.dropped, 1)
+					s.dropped.Add(1)
 					continue
 				}
 			}
@@ -257,14 +257,14 @@ func (s *Subscription) pump(ctx context.Context, notifyCh chan<- *DataChangeMess
 					if notifyCh != nil {
 						select {
 						case notifyCh <- out:
-							atomic.AddUint64(&s.delivered, 1)
+							s.delivered.Add(1)
 						default:
-							atomic.AddUint64(&s.dropped, 1)
+							s.dropped.Add(1)
 							s.sendError(ErrSlowConsumer)
 						}
 					} else if cb != nil {
 						cb(s, out)
-						atomic.AddUint64(&s.delivered, 1)
+						s.delivered.Add(1)
 					} else {
 						panic("notifyCh or cb must be set")
 					}
@@ -304,12 +304,12 @@ func (s *Subscription) SubscriptionID() uint32 {
 
 // Delivered returns the number of DataChangeMessages delivered
 func (s *Subscription) Delivered() uint64 {
-	return atomic.LoadUint64(&s.delivered)
+	return s.delivered.Load()
 }
 
 // Dropped returns the number of DataChangeMessages dropped due to a slow consumer
 func (s *Subscription) Dropped() uint64 {
-	return atomic.LoadUint64(&s.dropped)
+	return s.dropped.Load()
 }
 
 // AddNodes adds nodes defined by their string representation
