@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -343,4 +344,24 @@ func TestAddReferenceShowsNodeTwice(t *testing.T) {
 		found = found || it.NodeID == "ns=2;s=Temp"
 	}
 	require.True(t, found, "still below its own parent")
+}
+
+// A server that advertises a host name the client cannot resolve is still
+// reached at the host the client dialled.
+func TestAdvertisedHostNameIsNotResolved(t *testing.T) {
+	cert, key := testCert(t, "urn:test:server")
+	port := freePort(t)
+	srv := server.New(server.Certificate(cert), server.PrivateKey(key),
+		server.EndPoint("no-such-host.invalid", port), server.ListenAddress(fmt.Sprintf("127.0.0.1:%d", port)),
+		server.EnableSecurity("None", ua.MessageSecurityModeNone), server.EnableAuthMode(ua.UserTokenTypeAnonymous))
+	require.NoError(t, srv.Start(context.Background()))
+	defer srv.Close()
+
+	eps, err := client.Endpoints(context.Background(), fmt.Sprintf("opc.tcp://127.0.0.1:%d", port), 0)
+	require.NoError(t, err)
+	require.Contains(t, eps[0].URL, "no-such-host.invalid")
+	c := dial(t, fmt.Sprintf("opc.tcp://127.0.0.1:%d", port), client.Options{Security: client.NoSecurity()})
+	st, err := c.ServerStatus(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "Running", st.State)
 }

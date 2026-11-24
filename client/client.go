@@ -10,6 +10,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"sort"
 	"sync"
@@ -206,18 +208,42 @@ func Dial(ctx context.Context, endpoint string, o Options) (*Client, error) {
 		default: // a slow reader misses intermediate states, never blocks the client
 		}
 	}))
-	c, err := opcua.NewClient(ep.EndpointURL, opts...)
+	url := connectURL(endpoint, ep.EndpointURL)
+	c, err := opcua.NewClient(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("client: %w", err)
 	}
 	if err := c.Connect(dctx); err != nil {
 		_ = c.Close(context.Background())
-		return nil, fmt.Errorf("client: connect to %s: %w", ep.EndpointURL, err)
+		return nil, fmt.Errorf("client: connect to %s: %w", url, err)
 	}
 	cl.c = c
 	cl.ep = ep
 	cl.readLimits(ctx)
 	return cl, nil
+}
+
+// connectURL is where to open the session: the endpoint the server
+// advertises, but at the host the caller dialled. Servers often advertise
+// their own host name, which the client cannot resolve (OPC 10000-4
+// §5.4.4 lets clients substitute the host they used for discovery); the
+// advertised port and path are kept, since a discovery endpoint may point
+// to another port.
+func connectURL(dialled, advertised string) string {
+	d, err1 := url.Parse(dialled)
+	a, err2 := url.Parse(advertised)
+	if err1 != nil || err2 != nil || d.Hostname() == "" || a.Hostname() == "" {
+		return dialled
+	}
+	port := a.Port()
+	if port == "" {
+		port = d.Port()
+	}
+	a.Host = net.JoinHostPort(d.Hostname(), port)
+	if port == "" {
+		a.Host = d.Hostname()
+	}
+	return a.String()
 }
 
 // pickEndpoint chooses an endpoint for the security and user token type.
