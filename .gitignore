@@ -1,0 +1,14 @@
+.DS_Store
+vendor/
+build/
+dist/
+__pycache__/
+.vscode/
+*.pem
+*.crt
+*.csr
+*.exe
+.idea/
+__debug*
+# Internal development plan, kept outside the public repository.
+/plan.md

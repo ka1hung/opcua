@@ -1,0 +1,5 @@
+This product includes software from gopcua (MIT, Copyright (c) 2018-2025 The gopcua authors).
+Forked from github.com/gopcua/opcua at v0.9.2 (tag base/gopcua-v0.9.2); see LICENSE.
+
+Server feature design was informed by awcullen/opcua (MIT, Copyright (c) 2021 Converter Systems LLC);
+no source code from awcullen/opcua is included.

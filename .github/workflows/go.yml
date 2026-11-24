@@ -1,0 +1,64 @@
+name: ci
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test (linux, race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Dependencies
+        run: |
+          go mod download
+          pip3 install opcua
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+      - name: go.mod tidy
+        run: go mod tidy -diff
+
+      - name: Unit tests (-race)
+        run: go test -count=1 -race ./...
+
+      - name: Integration tests (-race)
+        run: go test -count=1 -race -tags=integration ./tests/go/... ./tests/python/...
+
+      - name: Conformance tests (-race)
+        run: go test -count=1 -race -tags=conformance ./tests/...
+
+  cross-build:
+    name: Cross build (CGO_ENABLED=0)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - { goos: windows, goarch: amd64, goarm: "" }
+          - { goos: linux, goarch: amd64, goarm: "" }
+          - { goos: linux, goarch: arm, goarm: "7" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build ${{ matrix.target.goos }}/${{ matrix.target.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.target.goos }}
+          GOARCH: ${{ matrix.target.goarch }}
+          GOARM: ${{ matrix.target.goarm }}
+        run: go build ./...
