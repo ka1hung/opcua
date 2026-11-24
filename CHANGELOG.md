@@ -4,7 +4,7 @@
 
 與 gopcua 基準的逐項差異見 [docs/CHANGES.md](docs/CHANGES.md)。
 
-## 未發版
+## v0.2.0（2026-11-24）
 
 - 伺服器：`Server.AddReference`，在兩個已存在的節點之間加參照（例如讓舊資料夾也列出同一個點位，不必複製節點）。
 
