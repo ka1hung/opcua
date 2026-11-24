@@ -117,3 +117,7 @@
 
 #### 公開
 - repo 改為公開。內部開發計畫 `plan.md` 不再放進 repo（`.gitignore`），只留在開發者本機；上面紀錄中提到的 `plan.md` 指的就是它。README 與 SECURITY 改為公開專案的說法（不需 GOPRIVATE；漏洞用 GitHub 私下回報）。
+
+## 未發版
+
+- `server.Server.AddReference(source, refType, target)`：在兩個已存在的節點之間加參照與反向參照；refType 必須是 ReferenceType 節點。MBController 用它保留舊的 `Objects/Data` 入口，以 Organizes 指向新結構裡的同一批點位節點。

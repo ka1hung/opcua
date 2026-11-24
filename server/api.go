@@ -326,6 +326,23 @@ func (s *Server) OnWrite(f WriteFunc) {
 	s.writeMu.Unlock()
 }
 
+// AddReference adds a reference of type refType from source to target,
+// both existing nodes, and its inverse on target. Use it to show a node in
+// a second place, e.g. Organizes from a legacy folder to the same variable.
+// refType must be a ReferenceType node, such as Organizes (i=35).
+func (s *Server) AddReference(source, refType, target *ua.NodeID) error {
+	for _, n := range []*ua.NodeID{source, refType, target} {
+		if s.space.Node(n) == nil {
+			return fmt.Errorf("server: add reference: %s: %w", n, ua.StatusBadNodeIDUnknown)
+		}
+	}
+	if rt := s.space.Node(refType); rt.class != ua.NodeClassReferenceType {
+		return fmt.Errorf("server: add reference: %s is not a reference type: %w", refType, ua.StatusBadReferenceTypeIDInvalid)
+	}
+	s.space.addRef(source, refType, target)
+	return nil
+}
+
 // RemoveNode removes a node and the nodes it owns (its components,
 // properties and organized nodes that have no other parent). Clients
 // monitoring a removed variable get Bad_NodeIdUnknown.

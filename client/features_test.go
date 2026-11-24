@@ -319,3 +319,28 @@ func TestHistory(t *testing.T) {
 }
 
 var _ = errors.New
+
+func TestAddReferenceShowsNodeTwice(t *testing.T) {
+	s := newServer(t, false)
+	_, temp := plant(t, s)
+	legacy := ua.NewStringNodeID(2, "Data")
+	_, err := s.srv.AddFolder(server.ObjectsFolder, legacy, "Data")
+	require.NoError(t, err)
+	organizes := ua.NewNumericNodeID(0, 35)
+	require.NoError(t, s.srv.AddReference(legacy, organizes, temp))
+	require.Error(t, s.srv.AddReference(legacy, organizes, ua.NewStringNodeID(2, "Missing")))
+	require.Error(t, s.srv.AddReference(legacy, temp, temp), "the reference type must be a ReferenceType")
+
+	c := dial(t, s.ep, client.Options{Security: client.NoSecurity()})
+	items, err := c.Browse(context.Background(), legacy.String())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "ns=2;s=Temp", items[0].NodeID)
+	items, err = c.Browse(context.Background(), "ns=2;s=Plant")
+	require.NoError(t, err)
+	found := false
+	for _, it := range items {
+		found = found || it.NodeID == "ns=2;s=Temp"
+	}
+	require.True(t, found, "still below its own parent")
+}

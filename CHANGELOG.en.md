@@ -4,6 +4,10 @@
 
 Every difference from the gopcua base is listed in [docs/CHANGES.md](docs/CHANGES.md) (Chinese only).
 
+## Unreleased
+
+- Server: `Server.AddReference` adds a reference between two existing nodes (for example, so a legacy folder lists the same point without copying the node).
+
 ## v0.1.0 (2026-11-24)
 
 First public release, based on gopcua v0.9.2.
