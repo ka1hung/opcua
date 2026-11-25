@@ -48,7 +48,15 @@ func NewExtensionObject(value interface{}) *ExtensionObject {
 }
 
 func (e *ExtensionObject) Decode(b []byte) (int, error) {
+	return e.decodeAt(b, 0)
+}
+
+func (e *ExtensionObject) decodeAt(b []byte, depth int) (int, error) {
+	if depth > maxDecodeDepth {
+		return 0, StatusBadEncodingLimitsExceeded
+	}
 	buf := NewBuffer(b)
+	buf.depth = depth
 	e.TypeID = new(ExpandedNodeID)
 	buf.ReadStruct(e.TypeID)
 
@@ -63,6 +71,7 @@ func (e *ExtensionObject) Decode(b []byte) (int, error) {
 	}
 
 	body := NewBuffer(buf.ReadN(int(length)))
+	body.depth = depth
 	if buf.Error() != nil {
 		return buf.Pos(), buf.Error()
 	}

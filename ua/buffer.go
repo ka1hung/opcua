@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"reflect"
 	"time"
 
 	"github.com/ka1hung/opcua/errors"
@@ -33,6 +34,10 @@ type Buffer struct {
 	buf []byte
 	pos int
 	err error
+
+	// depth is how deep in nested values the decoding of buf is; the
+	// values ReadStruct decodes are one level deeper.
+	depth int
 }
 
 func NewBuffer(b []byte) *Buffer {
@@ -176,10 +181,13 @@ func (b *Buffer) ReadStruct(r interface{}) {
 	var n int
 	var err error
 	switch x := r.(type) {
+	case depthDecoder:
+		n, err = x.decodeAt(b.buf[b.pos:], b.depth+1)
 	case BinaryDecoder:
 		n, err = x.Decode(b.buf[b.pos:])
 	default:
-		n, err = Decode(b.buf[b.pos:], r)
+		val := reflect.ValueOf(r)
+		n, err = decode(b.buf[b.pos:], val, val.Type().String(), b.depth+1)
 	}
 	if err != nil {
 		b.err = err

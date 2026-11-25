@@ -210,6 +210,20 @@ func (s *Store) Validate(chainDER []byte, applicationURI string) error {
 		return status
 	}
 
+	// A trusted CA-issued certificate whose issuer chain does not reach a
+	// root in the store is the path by itself; its revocation is still
+	// looked up at its issuer, if the store or the peer has it.
+	if len(path) == 1 && !isSelfSigned(leaf) {
+		issuer := s.issuerOf(leaf, chain[1:])
+		if issuer == nil {
+			if s.opts.RequireCRL {
+				return ua.StatusBadCertificateRevocationUnknown
+			}
+			return nil
+		}
+		return s.checkRevoked(leaf, issuer)
+	}
+
 	// The issuers above the leaf must be valid, usable CAs and not revoked.
 	for i, c := range path {
 		if i > 0 {
@@ -251,11 +265,11 @@ func (s *Store) buildPath(leaf *x509.Certificate, sent []*x509.Certificate) ([]*
 	for _, c := range sent {
 		inter.AddCert(c)
 	}
-	if s.isTrusted(leaf) {
-		// A trusted certificate that is not self-signed is trusted by
-		// itself; the chain is still built to check its issuers.
-		roots.AddCert(leaf)
-	}
+	// A trusted certificate that is not self-signed is trusted by itself,
+	// but it is not added to the roots: crypto/x509 would then return the
+	// chain [leaf] alone, and its issuers would not be checked nor its
+	// revocation looked up. The chain is built to the issuer the store
+	// knows; without one, the leaf alone is the path (see Validate).
 
 	// Validity periods are checked by Validate, with ClockSkew; build the
 	// chain at a time the leaf is valid so that x509 checks only the path.
@@ -296,6 +310,19 @@ func (s *Store) buildPath(leaf *x509.Certificate, sent []*x509.Certificate) ([]*
 		}
 	}
 	return nil, ua.StatusBadCertificateUntrusted
+}
+
+// issuerOf finds the certificate that signed c among the store's
+// certificates and those the peer sent.
+func (s *Store) issuerOf(c *x509.Certificate, sent []*x509.Certificate) *x509.Certificate {
+	for _, list := range [][]*x509.Certificate{s.issuers, s.trusted, sent} {
+		for _, i := range list {
+			if !bytes.Equal(i.Raw, c.Raw) && c.CheckSignatureFrom(i) == nil {
+				return i
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) isTrusted(c *x509.Certificate) bool {

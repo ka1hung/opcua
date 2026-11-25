@@ -51,9 +51,26 @@ func (it *monitoredItem) isEvent() bool { return it.attr == ua.AttributeIDEventN
 
 // onValue receives a new value of a pushed item.
 func (it *monitoredItem) onValue(dv *ua.DataValue) {
+	// A pushed value bypasses readAttribute, so the user's read access is
+	// applied here, for every value: a CanRead that turns false after the
+	// item was created stops the values, and the client gets
+	// Bad_UserAccessDenied in their place (OPC 10000-4 §5.12.2.2). The
+	// callback runs outside the item's lock.
+	if !it.mayReadValue() {
+		dv = &ua.DataValue{Status: ua.StatusBadUserAccessDenied, ServerTimestamp: time.Now()}
+	}
 	it.mu.Lock()
 	defer it.mu.Unlock()
 	it.offerLocked(dv)
+}
+
+// mayReadValue reports whether the item's user may still read the value
+// of its node.
+func (it *monitoredItem) mayReadValue() bool {
+	if it.attr != ua.AttributeIDValue || it.sub == nil || it.sub.srv == nil {
+		return true
+	}
+	return it.sub.srv.userAccessLevel(it.node, it.who)&AccessLevelCurrentRead != 0
 }
 
 // offerLocked queues dv if it is a change under the item's filter.

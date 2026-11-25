@@ -4,6 +4,16 @@
 
 Every difference from the gopcua base is listed in [docs/CHANGES.md](docs/CHANGES.md) (Chinese only).
 
+## Unreleased
+
+Security fixes (thanks to a private report):
+
+- **Decoder recursion depth** (DoS before authentication): Variant, DataValue, DiagnosticInfo and ExtensionObject can nest without end, so a message under 2 MiB could overflow the server's stack and end the process (recover cannot stop a stack overflow). Nesting is now limited to 100 levels; deeper messages fail with `BadEncodingLimitsExceeded`.
+- **IndexRange overflow**: an IndexRange whose upper bound was the largest int panicked on the next value change, in a goroutine without recover, ending the server; on 32-bit (armv7) the trigger value is just `2147483647`.
+- **Client certificate binding**: the client accepted a different server certificate in an OpenSecureChannel response, so the TrustStore protected only the first connection; on an automatic reconnect a man in the middle could impersonate the server and receive the user's password. The response's certificate and security policy must now match those the channel was opened with; the server certificate in CreateSession must be the channel's, and a failed signature check now returns an error (it used to be only logged).
+- **Read access in subscriptions**: pushed monitored items (variables added with `AddVariable`) checked `CanRead` only when created, so a subscription kept receiving new values after read access was taken away. Every value is now checked; a denied user gets `BadUserAccessDenied`, and values resume when access returns.
+- **Certificate revocation**: a CA-issued certificate trusted individually (in `trusted/certs`) was not checked against a CRL, and `RequireCRL` had no effect, so it kept connecting after its CA revoked it. Its revocation is now checked against its issuer's CRL; if the issuer is not known, `RequireCRL` rejects it.
+
 ## v0.2.1 (2026-11-24)
 
 - **32-bit (armv7) fix**: 64-bit counters in the secure channel and monitor were not aligned on 32-bit platforms, so the first service request panicked and the connection was closed (clients saw BadTCPInternalError). CI now runs the tests as 32-bit too.

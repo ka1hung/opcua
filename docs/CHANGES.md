@@ -127,3 +127,12 @@
 - `client.Dial`：開 session 時連「使用者指定的主機」＋「伺服器回報端點的埠與路徑」（OPC 10000-4 §5.4.4 允許用戶端以 discovery 時用的主機取代）。之前直接連伺服器回報的網址，伺服器回報用戶端查不到的主機名稱時（例如舊版 MBController 回報 `opc.tcp://<電腦名稱>:46010`）會卡在 DNS 查詢而連不上。
 - **32 位元修正**（`uasc`、`monitor`）：`channelInstance.bytesSent` 與 monitor 的 `delivered` / `dropped` 改用 `atomic.Uint64`。原本是 `uint64` 加 `atomic.AddUint64`，靠欄位順序對齊；P0 加固在 `channelInstance` 前面加了欄位後對齊跑掉，32 位元平台（armv7、386）收到第一個 MSG 就 panic，`receiveSafe` 把 panic 轉成錯誤、送 ERR BadTCPInternalError 並關閉通道。CI 新增 `GOARCH=386` 單元測試工作。
 - **伺服器 `endpointsFor`**：GetEndpoints / CreateSession 的 EndpointUrl 不在伺服器設定清單時，原本原樣回傳所有端點（網址是伺服器設定的主機名稱），用戶端照著連會卡在 DNS；改為把主機換成用戶端所用的主機（保留埠與路徑），與 open62541 等實作相同。
+
+## 未發布（安全性修正）
+
+- **`ua` 解碼深度上限**（GHSA-fcmr-6rv7-672q）：`Variant`、`DataValue`、`DiagnosticInfo`、`ExtensionObject` 新增內部 `decodeAt(b, depth)`，公開的 `Decode` 從深度 0 開始；`Buffer` 新增 `depth` 欄位，`ReadStruct` 與反射解碼（`decode`、`decodeStruct`、`decodeSlice`、`decodeArray`）往下傳深度 +1。超過 `maxDecodeDepth`（100）回 `StatusBadEncodingLimitsExceeded`。解掉上游 `todo(fs): limit recursion depth to 100`；gopcua 上游應該也有同樣問題。
+- **`uasc` 用戶端 OPN 回應**（GHSA-9fhc-mm6p-cx94）：`readChunk` 的用戶端分支不再用回應的安全標頭覆寫 `cfg.SecurityPolicyURI`、`RemoteCertificate`、`Thumbprint`；原則不同回 `BadSecurityPolicyRejected`，憑證（leaf）不同回 `BadSecurityChecksFailed`，與伺服器端續約的檢查相同。
+- **`opcua` CreateSession**：回應的 `ServerCertificate` 必須與通道憑證同一張 leaf（Part 4 §5.6.2.2），否則 `BadCertificateInvalid`；`VerifySessionSignature` 失敗改回 `BadApplicationSignatureInvalid`（上游只 log，然後回傳 nil session 與 nil 錯誤）。
+- **`server` IndexRange**（GHSA-8mxw-fxpr-c4c7）：`applyIndexRange` 以 `rangeEnd` 計算切片上界，不再計算 `hi+1`。
+- **`server` 推送型監控項目的讀取權限**（GHSA-57r3-wjr8-q87m）：`monitoredItem.onValue` 每個值都以 `userAccessLevel` 檢查（在項目鎖之外呼叫 `CanRead`），拒絕時排入 `BadUserAccessDenied`。
+- **`certs` 個別信任的 CA 簽發憑證**（GHSA-m7qw-w8q9-w5hf）：`buildPath` 不再把 leaf 放進 roots（否則 x509 只回 `[leaf]`），改為建到 store 裡的簽發者；建不到時，`Validate` 以 `issuerOf` 找簽發者檢查 CRL，找不到且 `RequireCRL` 時回 `BadCertificateRevocationUnknown`。

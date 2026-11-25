@@ -37,7 +37,15 @@ type DataValue struct {
 }
 
 func (d *DataValue) Decode(b []byte) (int, error) {
+	return d.decodeAt(b, 0)
+}
+
+func (d *DataValue) decodeAt(b []byte, depth int) (int, error) {
+	if depth > maxDecodeDepth {
+		return 0, StatusBadEncodingLimitsExceeded
+	}
 	buf := NewBuffer(b)
+	buf.depth = depth
 	d.EncodingMask = buf.ReadByte()
 	d.Value = new(Variant)
 	if d.Has(DataValueValue) {

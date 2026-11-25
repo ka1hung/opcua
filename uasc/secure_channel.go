@@ -589,15 +589,18 @@ func (s *SecureChannel) readChunk() (*MessageChunk, error) {
 			return nil, errors.Errorf("sechan: invalid state. openingInstance is nil.")
 		}
 
-		s.cfg.SecurityPolicyURI = m.SecurityPolicyURI
+		// The response must come from the server the client asked for: the
+		// policy and certificate the client opened the channel with (and the
+		// TrustStore validated) bind every OPN response, including those of
+		// renewals and reconnects. The shared config is never taken from the
+		// response, so a response naming another certificate cannot redirect
+		// the channel to a key the client did not choose.
+		if m.SecurityPolicyURI != s.cfg.SecurityPolicyURI {
+			return nil, ua.StatusBadSecurityPolicyRejected
+		}
 		if m.SecurityPolicyURI != ua.SecurityPolicyURINone {
-			s.cfg.RemoteCertificate = m.AsymmetricSecurityHeader.SenderCertificate
-			// Re-derive the receiver thumbprint from the peer certificate
-			// learned in the inbound OPN. No-op for the client path, where
-			// Thumbprint is already set from the endpoint's ServerCertificate
-			// at session open.
-			if len(s.cfg.RemoteCertificate) > 0 {
-				s.cfg.Thumbprint = uapolicy.Thumbprint(s.cfg.RemoteCertificate)
+			if !sameLeafCert(m.AsymmetricSecurityHeader.SenderCertificate, s.cfg.RemoteCertificate) {
+				return nil, ua.StatusBadSecurityChecksFailed
 			}
 			debug.Printf("uasc %d: setting securityPolicy to %s", s.c.ID(), m.SecurityPolicyURI)
 

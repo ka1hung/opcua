@@ -116,7 +116,15 @@ func (m *Variant) Value() interface{} {
 
 // Decode implements the codec interface.
 func (m *Variant) Decode(b []byte) (int, error) {
+	return m.decodeAt(b, 0)
+}
+
+func (m *Variant) decodeAt(b []byte, depth int) (int, error) {
+	if depth > maxDecodeDepth {
+		return 0, StatusBadEncodingLimitsExceeded
+	}
 	buf := NewBuffer(b)
+	buf.depth = depth
 	m.mask = buf.ReadByte()
 
 	// a null value specifies that no other fields are encoded
@@ -335,12 +343,12 @@ func (m *Variant) decodeValue(buf *Buffer) interface{} {
 		buf.ReadStruct(v)
 		return v
 	case TypeIDVariant:
-		// todo(fs): limit recursion depth to 100
+		// the depth is bounded by ReadStruct (maxDecodeDepth)
 		v := new(Variant)
 		buf.ReadStruct(v)
 		return v
 	case TypeIDDiagnosticInfo:
-		// todo(fs): limit recursion depth to 100
+		// the depth is bounded by ReadStruct (maxDecodeDepth)
 		v := new(DiagnosticInfo)
 		buf.ReadStruct(v)
 		return v

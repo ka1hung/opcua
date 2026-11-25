@@ -31,7 +31,15 @@ type DiagnosticInfo struct {
 }
 
 func (d *DiagnosticInfo) Decode(b []byte) (int, error) {
+	return d.decodeAt(b, 0)
+}
+
+func (d *DiagnosticInfo) decodeAt(b []byte, depth int) (int, error) {
+	if depth > maxDecodeDepth {
+		return 0, StatusBadEncodingLimitsExceeded
+	}
 	buf := NewBuffer(b)
+	buf.depth = depth
 	d.EncodingMask = buf.ReadByte()
 	if d.Has(DiagnosticInfoSymbolicID) {
 		d.SymbolicID = buf.ReadInt32()

@@ -5,8 +5,10 @@
 package opcua
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"expvar"
 	"fmt"
 	"io"
@@ -858,10 +860,20 @@ func (c *Client) CreateSession(ctx context.Context, cfg *uasc.SessionConfig) (*S
 			return err
 		}
 
+		// OPC 10000-4 §5.6.2.2: the server certificate of the session must
+		// be the one the secure channel was opened with, else the signature
+		// below proves only that the sender holds its own key.
+		if sc.SecurityPolicyURI() != ua.SecurityPolicyURINone &&
+			!sameLeafCertificate(res.ServerCertificate, sc.RemoteCertificate()) {
+			return ua.StatusBadCertificateInvalid
+		}
+		if res.ServerSignature == nil {
+			res.ServerSignature = &ua.SignatureData{}
+		}
 		err := sc.VerifySessionSignature(res.ServerCertificate, nonce, res.ServerSignature.Signature)
 		if err != nil {
 			log.Printf("error verifying session signature: %s", err)
-			return nil
+			return ua.StatusBadApplicationSignatureInvalid
 		}
 
 		// Ensure we have a valid identity token that the server will accept before trying to activate a session
@@ -891,6 +903,20 @@ func (c *Client) CreateSession(ctx context.Context, cfg *uasc.SessionConfig) (*S
 		return nil
 	})
 	return s, err
+}
+
+// sameLeafCertificate reports whether two DER certificate fields, each a
+// certificate possibly followed by its chain, carry the same leaf.
+func sameLeafCertificate(a, b []byte) bool {
+	ca, err := x509.ParseCertificates(a)
+	if err != nil || len(ca) == 0 {
+		return false
+	}
+	cb, err := x509.ParseCertificates(b)
+	if err != nil || len(cb) == 0 {
+		return false
+	}
+	return bytes.Equal(ca[0].Raw, cb[0].Raw)
 }
 
 const defaultAnonymousPolicyID = "Anonymous"

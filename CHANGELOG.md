@@ -4,6 +4,16 @@
 
 與 gopcua 基準的逐項差異見 [docs/CHANGES.md](docs/CHANGES.md)。
 
+## 未發布
+
+安全性修正（感謝私下通報）：
+
+- **解碼器遞迴深度**（未驗證即可觸發的 DoS）：Variant、DataValue、DiagnosticInfo、ExtensionObject 可以無限巢狀，一個不到 2 MiB 的訊息就能讓伺服器 stack overflow 直接結束程序（recover 攔不住）。巢狀深度上限改為 100，超過回 `BadEncodingLimitsExceeded`。
+- **IndexRange 溢位**：IndexRange 上界設成 int 最大值時，下次值變動會在沒有 recover 的 goroutine panic，整個伺服器結束；32 位元（armv7）上觸發值只是 `2147483647`。
+- **用戶端憑證綁定**：用戶端原本接受 OpenSecureChannel 回應裡換掉的伺服器憑證，TrustStore 只保護第一次連線，自動重連時中間人可以冒充伺服器並取得使用者密碼。現在回應的憑證與安全原則必須和開通道時相同；CreateSession 的伺服器憑證也必須是通道的憑證，簽章驗證失敗改回傳錯誤（之前只寫 log）。
+- **訂閱的讀取權限**：推送型（`AddVariable` 加的變數）監控項目只在建立時檢查 `CanRead`，之後取消權限，訂閱仍持續收到新值。現在每個值都會檢查，被拒時送 `BadUserAccessDenied`，恢復權限後繼續送值。
+- **憑證撤銷**：個別信任（放在 `trusted/certs`）的 CA 簽發憑證不會檢查 CRL，`RequireCRL` 也沒作用，被 CA 撤銷後仍可連線。現在會到簽發者的 CRL 檢查撤銷；找不到簽發者時，`RequireCRL` 會拒絕。
+
 ## v0.2.1（2026-11-24）
 
 - **32 位元（armv7）修正**：安全通道與 monitor 的 64 位元計數器在 32 位元平台沒有對齊，收到第一個服務請求就 panic、連線被關閉（用戶端看到 BadTCPInternalError）。CI 加上 32 位元測試。

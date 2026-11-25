@@ -287,6 +287,16 @@ func parseIndexRange(r string) (lo, hi int, ok bool) {
 	return a, b, true
 }
 
+// rangeEnd is the end, exclusive, of the slice the last index hi selects
+// from n elements. It does not compute hi+1 for an hi at or past the end,
+// which a client may set to the largest int.
+func rangeEnd(hi, n int) int {
+	if hi >= n-1 {
+		return n
+	}
+	return hi + 1
+}
+
 // applyIndexRange returns the part of an array, String or ByteString
 // value selected by a one-dimensional index range.
 func applyIndexRange(v *ua.Variant, r string) (*ua.Variant, ua.StatusCode) {
@@ -302,13 +312,13 @@ func applyIndexRange(v *ua.Variant, r string) (*ua.Variant, ua.StatusCode) {
 		if lo >= len(x) {
 			return nil, ua.StatusBadIndexRangeNoData
 		}
-		out, _ := ua.NewVariant(x[lo:min(hi+1, len(x))])
+		out, _ := ua.NewVariant(x[lo:rangeEnd(hi, len(x))])
 		return out, ua.StatusOK
 	case []byte:
 		if lo >= len(x) {
 			return nil, ua.StatusBadIndexRangeNoData
 		}
-		out, _ := ua.NewVariant(append([]byte(nil), x[lo:min(hi+1, len(x))]...))
+		out, _ := ua.NewVariant(append([]byte(nil), x[lo:rangeEnd(hi, len(x))]...))
 		return out, ua.StatusOK
 	}
 	rv := reflect.ValueOf(v.Value())
@@ -319,7 +329,7 @@ func applyIndexRange(v *ua.Variant, r string) (*ua.Variant, ua.StatusCode) {
 		return nil, ua.StatusBadIndexRangeNoData
 	}
 	part := reflect.MakeSlice(rv.Type(), 0, 0)
-	part = reflect.AppendSlice(part, rv.Slice(lo, min(hi+1, rv.Len())))
+	part = reflect.AppendSlice(part, rv.Slice(lo, rangeEnd(hi, rv.Len())))
 	out, err := ua.NewVariant(part.Interface())
 	if err != nil {
 		return nil, ua.StatusBadIndexRangeNoData
