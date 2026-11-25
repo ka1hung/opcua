@@ -4,7 +4,7 @@
 
 Every difference from the gopcua base is listed in [docs/CHANGES.md](docs/CHANGES.md) (Chinese only).
 
-## Unreleased
+## v0.2.2 (2026-11-25)
 
 Security fixes (thanks to a private report):
 

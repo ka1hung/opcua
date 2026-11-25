@@ -4,7 +4,7 @@
 
 與 gopcua 基準的逐項差異見 [docs/CHANGES.md](docs/CHANGES.md)。
 
-## 未發布
+## v0.2.2（2026-11-25）
 
 安全性修正（感謝私下通報）：
 
