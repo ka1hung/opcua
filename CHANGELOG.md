@@ -4,6 +4,14 @@
 
 與 gopcua 基準的逐項差異見 [docs/CHANGES.md](docs/CHANGES.md)。
 
+## 未發布（v0.2.3）
+
+- 用戶端 `Subscribe` 不限點數：依伺服器的 MaxMonitoredItemsPerCall 分批建立監控項目；訂閱滿了（Bad_TooManyMonitoredItems）自動再開一個訂閱。之前一次全部送出，超過伺服器上限（本套件伺服器預設單一請求 5,000 個）就整個失敗。`Subscription.Count()` 回報用了幾個訂閱。
+- 用戶端支援 `nsu=<命名空間 URI>;<id>` 形式的 NodeID（讀、寫、訂閱、瀏覽、方法、歷史全部適用），伺服器重新啟動後命名空間順序改變也不受影響；`Client.NSU` 把 `ns=` 轉成 `nsu=`。
+- 用戶端 `Options.VerifyServer`：連線前檢查伺服器憑證，可用來記住第一次看到的憑證（TOFU）；`Options.ApplicationName` 設定伺服器看到的應用程式名稱；`EndpointInfo.Thumbprint` 與 `CertThumbprint`。
+- 伺服器：`Server.SessionOf(ctx)` 在寫入、方法、確認警報的回呼裡取得是哪個用戶端；`SessionInfo` 增加 ClientName、ClientAddr、Created、MonitoredItems；`Server.CloseSession` 中斷連線。
+- 信任清單：`certs.Store` 增加 `Trusted`、`Untrust`、`DeleteRejected`。
+
 ## v0.2.2（2026-11-25）
 
 安全性修正（感謝私下通報）：

@@ -140,7 +140,7 @@ func (c *Client) HistoryEvents(ctx context.Context, notifier string, start, end 
 // continuation points while more returns true, and releases a
 // continuation point it does not follow.
 func (c *Client) historyRead(ctx context.Context, nodeID string, details any, more func(*ua.HistoryReadResult) bool) error {
-	nid, err := parse(nodeID)
+	nid, err := c.parse(nodeID)
 	if err != nil {
 		return err
 	}

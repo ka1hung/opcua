@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 // Subscription delivers value changes of nodes.
 type Subscription struct {
-	sub    *opcua.Subscription
+	subs   []*opcua.Subscription
 	cancel context.CancelFunc
 	done   chan struct{}
 	once   sync.Once
@@ -88,21 +89,34 @@ func (c *Client) Subscribe(ctx context.Context, ids []string, interval time.Dura
 // SubscribeWith is Subscribe with options: deadband, queue size, sampling
 // and trigger. A node whose options the server refuses, such as a percent
 // deadband without EURange, fails with its own Bad status.
+//
+// Any number of nodes can be subscribed: the items are created in calls of
+// at most the server's MaxMonitoredItemsPerCall, and when a subscription is
+// full (Bad_TooManyMonitoredItems) the rest go to another subscription.
+// Nodes that no subscription accepts keep that Bad status.
 func (c *Client) SubscribeWith(ctx context.Context, ids []string, o SubscribeOptions, f func(nodeID string, r Result)) (*Subscription, []Result, error) {
 	ch := make(chan *opcua.PublishNotificationData, 256)
-	sctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-	sub, err := c.c.Subscribe(sctx, &opcua.SubscriptionParameters{Interval: o.Interval}, ch)
-	if err != nil {
+	s := &Subscription{c: c, done: make(chan struct{})}
+	newSub := func() (*opcua.Subscription, error) {
+		sctx, cancel := context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+		sub, err := c.c.Subscribe(sctx, &opcua.SubscriptionParameters{Interval: o.Interval}, ch)
+		if err != nil {
+			return nil, err
+		}
+		s.subs = append(s.subs, sub)
+		return sub, nil
+	}
+	if _, err := newSub(); err != nil {
 		return nil, nil, fmt.Errorf("client: subscribe: %w", err)
 	}
 
 	results := make([]Result, len(ids))
-	var reqs []*ua.MonitoredItemCreateRequest
-	var idx []int
-	for i, s := range ids {
-		results[i].NodeID = s
-		nid, err := parse(s)
+	var pending []int // indexes into ids still to monitor
+	reqOf := map[int]*ua.MonitoredItemCreateRequest{}
+	for i, str := range ids {
+		results[i].NodeID = str
+		nid, err := c.parse(str)
 		if err != nil {
 			results[i].Err, results[i].Status = err, ua.StatusBadNodeIDInvalid
 			continue
@@ -115,24 +129,68 @@ func (c *Client) SubscribeWith(ctx context.Context, ids []string, o SubscribeOpt
 		}
 		p.DiscardOldest = !o.DiscardNewest
 		p.Filter = o.filter()
-		reqs = append(reqs, req)
-		idx = append(idx, i)
+		reqOf[i] = req
+		pending = append(pending, i)
 	}
-	if len(reqs) > 0 {
-		resp, err := sub.Monitor(sctx, ua.TimestampsToReturnBoth, reqs...)
-		if err != nil {
-			_ = sub.Cancel(context.Background())
-			return nil, nil, fmt.Errorf("client: monitor: %w", err)
-		}
-		for k, r := range resp.Results {
-			if k < len(idx) {
-				results[idx[k]].Status = r.StatusCode
+
+	c.mu.Lock()
+	per := c.maxMonitor
+	c.mu.Unlock()
+	if per <= 0 {
+		per = 1000
+	}
+	const maxSubs = 64
+	for len(pending) > 0 {
+		sub := s.subs[len(s.subs)-1]
+		var full []int // refused because this subscription is full
+		accepted := 0
+		for len(pending) > 0 {
+			n := min(per, len(pending))
+			chunk := pending[:n]
+			reqs := make([]*ua.MonitoredItemCreateRequest, n)
+			for k, i := range chunk {
+				reqs[k] = reqOf[i]
 			}
+			mctx, cancel := context.WithTimeout(ctx, c.timeout)
+			resp, err := sub.Monitor(mctx, ua.TimestampsToReturnBoth, reqs...)
+			cancel()
+			if errors.Is(err, ua.StatusBadTooManyOperations) && per > 1 {
+				per /= 2 // the server allows fewer items per call than it said
+				continue
+			}
+			if err != nil {
+				s.cancelAll()
+				return nil, nil, fmt.Errorf("client: monitor: %w", err)
+			}
+			for k, r := range resp.Results {
+				if k >= len(chunk) {
+					break
+				}
+				i := chunk[k]
+				results[i].Status = r.StatusCode
+				switch {
+				case r.StatusCode == ua.StatusBadTooManyMonitoredItems:
+					full = append(full, i)
+				case r.StatusCode == ua.StatusOK || uint32(r.StatusCode)&0x80000000 == 0:
+					accepted++
+				}
+			}
+			pending = pending[n:]
 		}
+		if len(full) == 0 {
+			break
+		}
+		if accepted == 0 && len(s.subs) > 1 || len(s.subs) >= maxSubs {
+			break // a new subscription takes nothing more: leave them Bad_TooManyMonitoredItems
+		}
+		if _, err := newSub(); err != nil {
+			break // e.g. Bad_TooManySubscriptions: the rest keep their status
+		}
+		pending = full
 	}
 
 	runCtx, runCancel := context.WithCancel(context.Background())
-	s := &Subscription{sub: sub, cancel: runCancel, done: make(chan struct{}), c: c}
+	s.cancel = runCancel
 	go func() {
 		defer close(s.done)
 		for {
@@ -164,15 +222,30 @@ func (c *Client) SubscribeWith(ctx context.Context, ids []string, o SubscribeOpt
 	return s, results, nil
 }
 
+// Count returns how many server subscriptions carry the nodes.
+func (s *Subscription) Count() int { return len(s.subs) }
+
+func (s *Subscription) cancelAll() {
+	for _, sub := range s.subs {
+		ctx, cancel := context.WithTimeout(context.Background(), s.c.timeout)
+		_ = sub.Cancel(ctx)
+		cancel()
+	}
+}
+
 // Close ends the subscription.
 func (s *Subscription) Close() error {
 	var err error
 	s.once.Do(func() {
 		s.cancel()
 		<-s.done
-		ctx, cancel := context.WithTimeout(context.Background(), s.c.timeout)
-		defer cancel()
-		err = s.sub.Cancel(ctx)
+		for _, sub := range s.subs {
+			ctx, cancel := context.WithTimeout(context.Background(), s.c.timeout)
+			if e := sub.Cancel(ctx); e != nil && err == nil {
+				err = e
+			}
+			cancel()
+		}
 	})
 	return err
 }

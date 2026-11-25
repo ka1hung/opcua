@@ -2,12 +2,14 @@ package client
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ka1hung/opcua"
+	"github.com/ka1hung/opcua/certs"
 	"github.com/ka1hung/opcua/id"
 	"github.com/ka1hung/opcua/ua"
 )
@@ -72,7 +74,7 @@ var nodeAttributes = []ua.AttributeID{
 // Attributes reads a node's attributes.
 func (c *Client) Attributes(ctx context.Context, nodeID string) (NodeInfo, error) {
 	info := NodeInfo{NodeID: nodeID}
-	nid, err := parse(nodeID)
+	nid, err := c.parse(nodeID)
 	if err != nil {
 		return info, err
 	}
@@ -191,7 +193,7 @@ func TypeName(dt *ua.NodeID) string {
 // "ns:name" for namespaces other than 0, e.g.
 // Translate(ctx, "i=85", "2:Plant", "2:P0000_Temp").
 func (c *Client) Translate(ctx context.Context, start string, path ...string) (string, error) {
-	nid, err := parse(start)
+	nid, err := c.parse(start)
 	if err != nil {
 		return "", err
 	}
@@ -318,6 +320,9 @@ type EndpointInfo struct {
 	UserTokens    []string // "Anonymous", "UserName", "Certificate", "IssuedToken"
 	ServerURI     string
 	ServerName    string
+	// Thumbprint is the upper-case hex SHA-1 of the server certificate,
+	// empty when the endpoint has none.
+	Thumbprint string
 }
 
 // Endpoints lists a server's endpoints without opening a session, to see
@@ -346,10 +351,27 @@ func Endpoints(ctx context.Context, endpoint string, timeout time.Duration) ([]E
 				e.ServerName = ep.Server.ApplicationName.Text
 			}
 		}
+		e.Thumbprint = CertThumbprint(ep.ServerCertificate)
 		for _, t := range ep.UserIdentityTokens {
 			e.UserTokens = append(e.UserTokens, strings.TrimPrefix(t.TokenType.String(), "UserTokenType"))
 		}
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// CertThumbprint returns the upper-case hex SHA-1 thumbprint of a DER
+// certificate (the first one of a chain), as certs.Thumbprint does; empty
+// for no certificate.
+func CertThumbprint(der []byte) string {
+	if len(der) == 0 {
+		return ""
+	}
+	if c, err := x509.ParseCertificate(der); err == nil {
+		return certs.Thumbprint(c)
+	}
+	if cs, err := x509.ParseCertificates(der); err == nil && len(cs) > 0 {
+		return certs.Thumbprint(cs[0])
+	}
+	return ""
 }

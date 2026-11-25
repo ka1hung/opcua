@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,9 +104,16 @@ type Options struct {
 	Key         *rsa.PrivateKey
 	// ApplicationURI of this client; default "urn:opcua:client".
 	ApplicationURI string
+	// ApplicationName the server shows for this client, e.g. in its list of
+	// sessions; default "opcua client".
+	ApplicationName string
 	// TrustStore validates the server certificate. Without it any server
 	// certificate is accepted.
 	TrustStore *certs.Store
+	// VerifyServer, if set, is called with the server certificate (DER)
+	// of a secured endpoint before connecting; an error refuses the
+	// server. Use it to pin a certificate seen before (trust on first use).
+	VerifyServer func(cert []byte) error
 
 	// Reconnect makes the client reconnect after a connection loss and
 	// restore its subscriptions (default true; set NoReconnect to disable).
@@ -131,12 +139,15 @@ type Client struct {
 	timeout time.Duration
 	state   chan ConnState
 
-	mu        sync.Mutex
-	types     map[string]typeInfo
-	methods   map[string]methodArgs
-	maxRead   int
-	maxWrite  int
-	closeOnce sync.Once
+	mu         sync.Mutex
+	types      map[string]typeInfo
+	methods    map[string]methodArgs
+	maxRead    int
+	maxWrite   int
+	maxMonitor int
+	ns         []string // namespace table, for nsu= node ids
+	nsRead     time.Time
+	closeOnce  sync.Once
 }
 
 type typeInfo struct {
@@ -175,9 +186,17 @@ func Dial(ctx context.Context, endpoint string, o Options) (*Client, error) {
 		opcua.AutoReconnect(!o.NoReconnect),
 		opcua.ApplicationURI(o.ApplicationURI),
 	}
+	if o.ApplicationName != "" {
+		opts = append(opts, opcua.ApplicationName(o.ApplicationName))
+	}
 	if ep.SecurityPolicyURI != ua.SecurityPolicyURINone {
 		if o.TrustStore != nil {
 			if err := o.TrustStore.Validate(ep.ServerCertificate, ep.Server.ApplicationURI); err != nil {
+				return nil, fmt.Errorf("client: server certificate: %w", err)
+			}
+		}
+		if o.VerifyServer != nil {
+			if err := o.VerifyServer(ep.ServerCertificate); err != nil {
 				return nil, fmt.Errorf("client: server certificate: %w", err)
 			}
 		}
@@ -220,6 +239,7 @@ func Dial(ctx context.Context, endpoint string, o Options) (*Client, error) {
 	cl.c = c
 	cl.ep = ep
 	cl.readLimits(ctx)
+	_ = cl.loadNamespaces(ctx)
 	return cl, nil
 }
 
@@ -286,17 +306,18 @@ func pickEndpoint(eps []*ua.EndpointDescription, sec Security, tok ua.UserTokenT
 
 // readLimits reads the server's operation limits to split large requests.
 func (c *Client) readLimits(ctx context.Context) {
-	c.maxRead, c.maxWrite = 1000, 1000
+	c.maxRead, c.maxWrite, c.maxMonitor = 1000, 1000, 1000
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	resp, err := c.c.Read(ctx, &ua.ReadRequest{NodesToRead: []*ua.ReadValueID{
 		{NodeID: ua.NewNumericNodeID(0, id.Server_ServerCapabilities_OperationLimits_MaxNodesPerRead), AttributeID: ua.AttributeIDValue},
 		{NodeID: ua.NewNumericNodeID(0, id.Server_ServerCapabilities_OperationLimits_MaxNodesPerWrite), AttributeID: ua.AttributeIDValue},
+		{NodeID: ua.NewNumericNodeID(0, id.Server_ServerCapabilities_OperationLimits_MaxMonitoredItemsPerCall), AttributeID: ua.AttributeIDValue},
 	}})
-	if err != nil || len(resp.Results) != 2 {
+	if err != nil || len(resp.Results) != 3 {
 		return
 	}
-	for i, dst := range []*int{&c.maxRead, &c.maxWrite} {
+	for i, dst := range []*int{&c.maxRead, &c.maxWrite, &c.maxMonitor} {
 		if v := resp.Results[i]; v.Status == ua.StatusOK && v.Value != nil {
 			if n, ok := v.Value.Value().(uint32); ok && n > 0 && n < uint32(*dst) {
 				*dst = int(n)
@@ -326,6 +347,79 @@ func (c *Client) Close() error {
 func (c *Client) Underlying() *opcua.Client { return c.c }
 
 // parse parses a node id without panicking.
+// parse parses a node id, also in the form nsu=<namespace URI>;<id>,
+// which stays valid when the server's namespace table changes order.
+func (c *Client) parse(s string) (*ua.NodeID, error) {
+	if !strings.HasPrefix(s, "nsu=") {
+		return parse(s)
+	}
+	uri, rest, ok := strings.Cut(s[4:], ";")
+	if !ok {
+		return nil, fmt.Errorf("client: node id %q: %w", s, ua.StatusBadNodeIDInvalid)
+	}
+	idx, found := c.nsIndex(uri)
+	c.mu.Lock()
+	stale := time.Since(c.nsRead) > 10*time.Second
+	if stale {
+		c.nsRead = time.Now() // also when the read fails: do not ask for every node
+	}
+	c.mu.Unlock()
+	if !found && stale {
+		// The table may have grown since it was read; at most every 10 s.
+		if err := c.loadNamespaces(context.Background()); err == nil {
+			idx, found = c.nsIndex(uri)
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("client: node id %q: namespace not on the server: %w", s, ua.StatusBadNodeIDUnknown)
+	}
+	return parse(fmt.Sprintf("ns=%d;%s", idx, rest))
+}
+
+func (c *Client) nsIndex(uri string) (int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, u := range c.ns {
+		if u == uri {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func (c *Client) loadNamespaces(ctx context.Context) error {
+	ns, err := c.Namespaces(ctx)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.ns, c.nsRead = ns, time.Now()
+	c.mu.Unlock()
+	return nil
+}
+
+// NSU returns nodeID in the form nsu=<namespace URI>;<id>, which does not
+// depend on the order of the server's namespace table. Node ids of
+// namespace 0, already in that form, or of an unknown namespace are
+// returned unchanged.
+func (c *Client) NSU(nodeID string) string {
+	nid, err := ua.ParseNodeID(nodeID)
+	if err != nil || nid.Namespace() == 0 {
+		return nodeID
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if int(nid.Namespace()) >= len(c.ns) {
+		return nodeID
+	}
+	full := nid.String()
+	_, rest, ok := strings.Cut(full, ";")
+	if !ok {
+		return nodeID
+	}
+	return "nsu=" + c.ns[nid.Namespace()] + ";" + rest
+}
+
 func parse(s string) (*ua.NodeID, error) {
 	nid, err := ua.ParseNodeID(s)
 	if err != nil {
@@ -357,7 +451,7 @@ func (c *Client) ReadMany(ctx context.Context, ids []string) []Result {
 	var idx []int
 	for i, s := range ids {
 		results[i].NodeID = s
-		nid, err := parse(s)
+		nid, err := c.parse(s)
 		if err != nil {
 			results[i].Err, results[i].Status = err, ua.StatusBadNodeIDInvalid
 			continue
@@ -401,7 +495,7 @@ func statusOf(err error) ua.StatusCode {
 // DataType, which is read once and cached. The returned error wraps the
 // server's status code when the write is refused.
 func (c *Client) WriteAuto(ctx context.Context, nodeID string, value any) error {
-	nid, err := parse(nodeID)
+	nid, err := c.parse(nodeID)
 	if err != nil {
 		return err
 	}
@@ -503,7 +597,7 @@ func (c *Client) typeOf(ctx context.Context, nid *ua.NodeID) (typeInfo, error) {
 // Browse lists the nodes a node references hierarchically, following
 // continuation points.
 func (c *Client) Browse(ctx context.Context, nodeID string) ([]BrowseItem, error) {
-	nid, err := parse(nodeID)
+	nid, err := c.parse(nodeID)
 	if err != nil {
 		return nil, err
 	}

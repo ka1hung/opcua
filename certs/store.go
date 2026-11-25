@@ -473,6 +473,53 @@ func (s *Store) Trust(c *x509.Certificate) error {
 	return s.reload()
 }
 
+// Trusted lists the certificates in trusted/certs.
+func (s *Store) Trusted() ([]*x509.Certificate, error) {
+	return readCertDir(s.trustedCerts())
+}
+
+// Untrust removes a certificate, by its Thumbprint, from trusted/certs.
+// A client using it is refused from its next connection on.
+func (s *Store) Untrust(thumbprint string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := removeByThumbprint(s.trustedCerts(), thumbprint); err != nil {
+		return err
+	}
+	return s.reload()
+}
+
+// DeleteRejected removes a certificate, by its Thumbprint, from
+// rejected/certs. It is listed there again when the client tries again.
+func (s *Store) DeleteRejected(thumbprint string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return removeByThumbprint(s.rejectedCerts(), thumbprint)
+}
+
+func removeByThumbprint(dir, thumbprint string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, c := range parseCerts(b) {
+			if strings.EqualFold(Thumbprint(c), thumbprint) {
+				return os.Remove(p)
+			}
+		}
+	}
+	return fmt.Errorf("certs: no certificate %s in %s", thumbprint, dir)
+}
+
 func readCertDir(dir string) ([]*x509.Certificate, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

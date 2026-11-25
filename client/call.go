@@ -37,7 +37,7 @@ func (c *Client) methodArgs(ctx context.Context, method string) (methodArgs, err
 	if ok {
 		return ma, nil
 	}
-	nid, err := parse(method)
+	nid, err := c.parse(method)
 	if err != nil {
 		return ma, err
 	}
@@ -122,11 +122,11 @@ func (e *CallError) Unwrap() error { return e.Status }
 // text from a form works: Call(ctx, obj, m, "reason", "3.5"). It returns
 // the output arguments; a refused call returns a *CallError.
 func (c *Client) Call(ctx context.Context, object, method string, args ...any) ([]any, error) {
-	oid, err := parse(object)
+	oid, err := c.parse(object)
 	if err != nil {
 		return nil, err
 	}
-	mid, err := parse(method)
+	mid, err := c.parse(method)
 	if err != nil {
 		return nil, err
 	}

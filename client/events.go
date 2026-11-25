@@ -140,7 +140,7 @@ func (c *Client) SubscribeEvents(ctx context.Context, notifier string, interval 
 	if notifier == "" {
 		notifier = ServerObject
 	}
-	nid, err := parse(notifier)
+	nid, err := c.parse(notifier)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func (c *Client) Acknowledge(ctx context.Context, ev Event, comment string) erro
 	if !ev.IsCondition() {
 		return errNotCondition
 	}
-	cid, err := parse(ev.ConditionID)
+	cid, err := c.parse(ev.ConditionID)
 	if err != nil {
 		return err
 	}

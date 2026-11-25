@@ -52,11 +52,14 @@ var anonymous = &Identity{TokenType: ua.UserTokenTypeAnonymous}
 type Session struct {
 	srv *Server
 
-	id        *ua.NodeID
-	authToken *ua.NodeID
-	name      string
-	timeout   time.Duration
-	clientURI string
+	id         *ua.NodeID
+	authToken  *ua.NodeID
+	name       string
+	timeout    time.Duration
+	clientURI  string
+	clientName string
+	created    time.Time
+	remoteAddr string
 	// clientCert is the leaf certificate of the channel the session was
 	// created on; a session may move only to a channel with the same one.
 	clientCert []byte
@@ -147,6 +150,8 @@ func (m *sessionManager) create(sc *uasc.SecureChannel, name string, timeout tim
 		channelID:    sc.SecureChannelID(),
 		sc:           sc,
 		lastActivity: time.Now(),
+		created:      time.Now(),
+		remoteAddr:   remoteAddr(sc),
 		browseCPs:    make(map[string]*browseCP),
 		historyCPs:   make(map[string]*historyCP),
 	}
@@ -154,6 +159,14 @@ func (m *sessionManager) create(sc *uasc.SecureChannel, name string, timeout tim
 	m.byToken[tokenKey(s.authToken)] = s
 	m.byID[s.id.String()] = s
 	return s, nil
+}
+
+func remoteAddr(sc *uasc.SecureChannel) (addr string) {
+	defer func() { _ = recover() }() // a channel without a TCP connection (tests)
+	if a := sc.RemoteAddr(); a != nil {
+		return a.String()
+	}
+	return ""
 }
 
 func newGUID() string {

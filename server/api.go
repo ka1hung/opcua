@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -369,36 +370,76 @@ type Stats struct {
 
 // SessionInfo describes a session for display.
 type SessionInfo struct {
-	ID            string
-	Name          string
-	ClientURI     string
-	User          string
-	Activated     bool
-	LastActivity  time.Time
-	Subscriptions int
+	ID         string
+	Name       string // the session name the client chose
+	ClientURI  string // the client's ApplicationURI
+	ClientName string // the client's ApplicationName
+	// ClientAddr is the remote address of the session's connection.
+	ClientAddr     string
+	User           string
+	Activated      bool
+	Created        time.Time
+	LastActivity   time.Time
+	Subscriptions  int
+	MonitoredItems int
 }
 
 // Stats returns the current connections, sessions and subscriptions.
 func (s *Server) Stats() Stats {
 	st := Stats{Connections: s.cb.count(), Subscriptions: s.subs.count()}
 	for _, sess := range s.sessions.list() {
-		sess.mu.Lock()
-		info := SessionInfo{
-			ID:           sess.id.String(),
-			Name:         sess.name,
-			ClientURI:    sess.clientURI,
-			Activated:    sess.activated,
-			LastActivity: sess.lastActivity,
-		}
-		if sess.identity != nil && !sess.identity.Anonymous() {
-			info.User = sess.identity.UserName
-			if sess.identity.Certificate != nil {
-				info.User = sess.identity.Certificate.Subject.CommonName
-			}
-		}
-		sess.mu.Unlock()
-		info.Subscriptions = len(s.subs.ofSession(sess))
-		st.Sessions = append(st.Sessions, info)
+		st.Sessions = append(st.Sessions, s.sessionInfo(sess))
 	}
 	return st
+}
+
+func (s *Server) sessionInfo(sess *Session) SessionInfo {
+	sess.mu.Lock()
+	info := SessionInfo{
+		ID:           sess.id.String(),
+		Name:         sess.name,
+		ClientURI:    sess.clientURI,
+		ClientName:   sess.clientName,
+		ClientAddr:   sess.remoteAddr,
+		Activated:    sess.activated,
+		Created:      sess.created,
+		LastActivity: sess.lastActivity,
+	}
+	if sess.identity != nil && !sess.identity.Anonymous() {
+		info.User = sess.identity.UserName
+		if sess.identity.Certificate != nil {
+			info.User = sess.identity.Certificate.Subject.CommonName
+		}
+	}
+	sess.mu.Unlock()
+	subs := s.subs.ofSession(sess)
+	info.Subscriptions = len(subs)
+	for _, sub := range subs {
+		sub.mu.Lock()
+		info.MonitoredItems += len(sub.items)
+		sub.mu.Unlock()
+	}
+	return info
+}
+
+// SessionOf describes the session of the request a callback (write,
+// method, acknowledge) runs for, e.g. to record which client wrote.
+func (s *Server) SessionOf(ctx context.Context) (SessionInfo, bool) {
+	sess := sessionFrom(ctx)
+	if sess == nil {
+		return SessionInfo{}, false
+	}
+	return s.sessionInfo(sess), true
+}
+
+// CloseSession closes a session and deletes its subscriptions; the client
+// gets Bad_SessionIdInvalid on its next request and usually reconnects.
+func (s *Server) CloseSession(id string) error {
+	for _, sess := range s.sessions.list() {
+		if sess.id.String() == id {
+			s.sessions.close(sess, true)
+			return nil
+		}
+	}
+	return fmt.Errorf("server: session %s: %w", id, ua.StatusBadSessionIDInvalid)
 }

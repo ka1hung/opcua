@@ -119,6 +119,9 @@ func (s *Server) createSession(ctx context.Context, r *Request) (ua.Response, er
 	sess.mu.Lock()
 	if req.ClientDescription != nil {
 		sess.clientURI = req.ClientDescription.ApplicationURI
+		if req.ClientDescription.ApplicationName != nil {
+			sess.clientName = req.ClientDescription.ApplicationName.Text
+		}
 	}
 	sess.serverNonce = nonce
 	sess.mu.Unlock()
