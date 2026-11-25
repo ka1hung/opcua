@@ -4,7 +4,7 @@
 
 Every difference from the gopcua base is listed in [docs/CHANGES.md](docs/CHANGES.md) (Chinese only).
 
-## Unreleased (v0.2.3)
+## v0.2.3 (2026-11-25)
 
 - Client `Subscribe` takes any number of nodes: items are created in calls of at most the server's MaxMonitoredItemsPerCall, and another subscription is opened when one is full (Bad_TooManyMonitoredItems). Before, all items went in one call and failed above the server's limit. `Subscription.Count()` reports how many subscriptions are used.
 - Client accepts node ids in the form `nsu=<namespace URI>;<id>` everywhere, so they survive a change of the server's namespace order; `Client.NSU` converts `ns=` ids.

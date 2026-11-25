@@ -4,7 +4,7 @@
 
 與 gopcua 基準的逐項差異見 [docs/CHANGES.md](docs/CHANGES.md)。
 
-## 未發布（v0.2.3）
+## v0.2.3（2026-11-25）
 
 - 用戶端 `Subscribe` 不限點數：依伺服器的 MaxMonitoredItemsPerCall 分批建立監控項目；訂閱滿了（Bad_TooManyMonitoredItems）自動再開一個訂閱。之前一次全部送出，超過伺服器上限（本套件伺服器預設單一請求 5,000 個）就整個失敗。`Subscription.Count()` 回報用了幾個訂閱。
 - 用戶端支援 `nsu=<命名空間 URI>;<id>` 形式的 NodeID（讀、寫、訂閱、瀏覽、方法、歷史全部適用），伺服器重新啟動後命名空間順序改變也不受影響；`Client.NSU` 把 `ns=` 轉成 `nsu=`。

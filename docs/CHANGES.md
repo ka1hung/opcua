@@ -136,3 +136,11 @@
 - **`server` IndexRange**（GHSA-8mxw-fxpr-c4c7）：`applyIndexRange` 以 `rangeEnd` 計算切片上界，不再計算 `hi+1`。
 - **`server` 推送型監控項目的讀取權限**（GHSA-57r3-wjr8-q87m）：`monitoredItem.onValue` 每個值都以 `userAccessLevel` 檢查（在項目鎖之外呼叫 `CanRead`），拒絕時排入 `BadUserAccessDenied`。
 - **`certs` 個別信任的 CA 簽發憑證**（GHSA-m7qw-w8q9-w5hf）：`buildPath` 不再把 leaf 放進 roots（否則 x509 只回 `[leaf]`），改為建到 store 裡的簽發者；建不到時，`Validate` 以 `issuerOf` 找簽發者檢查 CRL，找不到且 `RequireCRL` 時回 `BadCertificateRevocationUnknown`。
+
+## v0.2.3（2026-11-25）
+
+- **`client.Subscribe` 分批**：依伺服器的 MaxMonitoredItemsPerCall 分批送 CreateMonitoredItems；回 `Bad_TooManyMonitoredItems` 時自動再開一個訂閱。`Subscription.Count()` 回報用了幾個訂閱。
+- **`nsu=` NodeID**：用戶端各 API（讀、寫、訂閱、瀏覽、方法、歷史）接受 `nsu=<URI>;<id>`，連線時依伺服器的 NamespaceArray 轉成索引；`Client.NSU` 反向轉換。
+- **用戶端憑證檢查**：`Options.VerifyServer` 在開通道前檢查伺服器憑證（可做 TOFU）；`Options.ApplicationName`；`EndpointInfo.Thumbprint`、`CertThumbprint`。
+- **伺服器 session 資訊**：`Server.SessionOf(ctx)` 在寫入、方法、確認警報回呼取得用戶端；`SessionInfo` 增加 ClientName、ClientAddr、Created、MonitoredItems；`Server.CloseSession`。
+- **`certs.Store`**：`Trusted`、`Untrust`、`DeleteRejected`。
